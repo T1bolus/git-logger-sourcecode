@@ -1,0 +1,4 @@
+aiohttp<4,>=3.10
+python-dotenv<2,>=1.0
+requests<3,>=2.31
+rsa<5,>=4.9

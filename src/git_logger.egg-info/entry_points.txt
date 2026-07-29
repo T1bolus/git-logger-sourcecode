@@ -1,0 +1,2 @@
+[console_scripts]
+git-logger = git_logger.__main__:main

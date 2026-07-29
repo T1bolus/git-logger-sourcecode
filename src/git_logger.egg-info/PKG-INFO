@@ -1,0 +1,9 @@
+Metadata-Version: 2.4
+Name: git-logger
+Version: 0.1.0
+Summary: Track website changes with automatic git commits
+Requires-Python: >=3.9
+Requires-Dist: aiohttp<4,>=3.10
+Requires-Dist: python-dotenv<2,>=1.0
+Requires-Dist: requests<3,>=2.31
+Requires-Dist: rsa<5,>=4.9

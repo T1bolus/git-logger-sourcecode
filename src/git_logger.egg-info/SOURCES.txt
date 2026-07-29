@@ -1,0 +1,17 @@
+pyproject.toml
+src/git_logger/__init__.py
+src/git_logger/__main__.py
+src/git_logger/app.py
+src/git_logger/config.py
+src/git_logger/repo_manager.py
+src/git_logger/state.py
+src/git_logger/steam_auth.py
+src/git_logger/steam_session.py
+src/git_logger/tracker.py
+src/git_logger/web.py
+src/git_logger.egg-info/PKG-INFO
+src/git_logger.egg-info/SOURCES.txt
+src/git_logger.egg-info/dependency_links.txt
+src/git_logger.egg-info/entry_points.txt
+src/git_logger.egg-info/requires.txt
+src/git_logger.egg-info/top_level.txt

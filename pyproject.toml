@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "git-logger"
+version = "0.1.0"
+description = "Track website changes with automatic git commits"
+requires-python = ">=3.9"
+dependencies = [
+  "aiohttp>=3.10,<4",
+  "python-dotenv>=1.0,<2",
+  "requests>=2.31,<3",
+  "rsa>=4.9,<5",
+]
+
+[project.scripts]
+git-logger = "git_logger.__main__:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
