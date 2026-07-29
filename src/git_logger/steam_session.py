@@ -120,18 +120,28 @@ class SteamSession:
 
     @staticmethod
     def _extract_game_list(page_html: str) -> list | None:
-        games = []
-        seen = set()
-        for m in re.finditer(r'href="https://store\.steampowered\.com/app/(\d+)"[^>]*>\s*([^<]+)\s*<', page_html):
-            appid = int(m.group(1))
-            name = html.unescape(m.group(2).strip())
-            if appid not in seen and appid > 0:
-                seen.add(appid)
-                games.append({"appid": appid, "name": name})
-        if not games:
+        m = re.search(r'SSR\.renderContext\s*=\s*JSON\.parse\("(.+)"\)\s*;', page_html)
+        if not m:
+            LOG.warning("SSR.renderContext not found in page")
             return None
-        games.sort(key=lambda x: x["appid"])
-        return games
+        try:
+            inner = json.loads('"' + m.group(1) + '"')
+            data = json.loads(inner)
+            qd = json.loads(data.get('queryData', '{}'))
+        except (json.JSONDecodeError, KeyError, TypeError) as exc:
+            LOG.warning("Failed to parse SSR renderContext: %s", exc)
+            return None
+        for q in qd.get('queries', []):
+            qkey = q.get('queryKey', [])
+            if len(qkey) >= 1 and qkey[0] == 'OwnedGames':
+                raw_games = q.get('state', {}).get('data')
+                if not isinstance(raw_games, list):
+                    return None
+                games = [{"appid": g["appid"], "name": g["name"]} for g in raw_games if "appid" in g and "name" in g]
+                games.sort(key=lambda x: x["appid"])
+                return games if games else None
+        LOG.warning("OwnedGames query not found in SSR data")
+        return None
 
     def _resolve_steam_url(self, url: str) -> str:
         """Resolve vanity /id/{name}/ URLs to /profiles/{steamid}/ for games pages."""
@@ -140,11 +150,15 @@ class SteamSession:
             return url
         if not re.search(r'^/id/[^/]+/games', parsed.path):
             return url
+        vanity = parsed.path.split('/')[2]
         try:
-            resp = self.session.get(url, allow_redirects=True, timeout=self.timeout)
+            resp = self.session.get(
+                "https://steamcommunity.com/id/{}/?xml=1".format(vanity),
+                timeout=self.timeout,
+            )
             if resp.status_code != 200:
                 return url
-            match = re.search(r'"steamid"\s*:\s*"(\d+)"', resp.text)
+            match = re.search(r'<steamID64>(\d+)</steamID64>', resp.text)
             if not match:
                 return url
             steamid = match.group(1)
