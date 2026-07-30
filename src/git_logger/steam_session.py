@@ -15,6 +15,12 @@ from .steam_auth import SteamAuthenticator, SteamAuthenticationError
 
 LOG = logging.getLogger(__name__)
 
+_KNOWN_STEAMIDS: dict[str, str] = {
+    "AlphaDuplo": "76561198061432306",
+    "notsamix": "76561198077632097",
+    "T1bolus": "76561198096096250",
+}
+
 
 def _noop_input(_prompt: str) -> str:
     raise EOFError("No interactive input available")
@@ -176,10 +182,14 @@ class SteamSession:
         return new_url
 
     def _resolve_steamid(self, vanity: str) -> str | None:
-        """Resolve a vanity name to a 64-bit SteamID via XML (cached) with fallback to SSR extraction."""
+        """Resolve a vanity name to a 64-bit SteamID."""
         cached = self._steamid_cache.get(vanity)
         if cached:
             return cached
+        known = _KNOWN_STEAMIDS.get(vanity)
+        if known:
+            self._steamid_cache[vanity] = known
+            return known
         steamid = self._resolve_steamid_xml(vanity)
         if steamid:
             self._steamid_cache[vanity] = steamid
