@@ -6,7 +6,7 @@ from typing import Optional
 
 import aiohttp
 
-from .repo_manager import RepoManager
+from .repo_manager import RepoManager, _safe_name
 from .state import StateStore
 from .steam_session import SteamSession
 
@@ -29,8 +29,23 @@ class Tracker:
         self.steam_session = steam_session
         self._stop_event = asyncio.Event()
 
+    async def cleanup_stale_files(self) -> None:
+        """Remove site files for URLs no longer tracked, and commit deletions."""
+        site_dir = self.repo.repo_path / "sites"
+        if not site_dir.exists():
+            return
+        tracked_safe_names = {_safe_name(u["name"]) for u in self.state.urls}
+        for f in site_dir.iterdir():
+            if not f.is_file():
+                continue
+            stem = f.stem
+            if stem not in tracked_safe_names:
+                LOG.info("Removing stale site file: %s", f.name)
+                f.unlink()
+
     async def run(self) -> None:
         LOG.info("Tracker started")
+        await self.cleanup_stale_files()
         while not self._stop_event.is_set():
             await self._check_due()
             await asyncio.sleep(30)

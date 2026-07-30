@@ -252,9 +252,16 @@ class WebServer:
 
     async def remove_url(self, request: web.Request) -> web.Response:
         url_id = int(request.match_info["id"])
-        if self.state.remove_url(url_id):
-            return web.json_response({"ok": True})
-        return web.json_response({"detail": "Not found"}, status=404)
+        entry = self.state.get_url(url_id)
+        if not entry:
+            return web.json_response({"detail": "Not found"}, status=404)
+        name = entry["name"]
+        url = entry["url"]
+        self.state.remove_url(url_id)
+        self.tracker.repo.delete_file(name)
+        if self.tracker.repo.commit("Remove: {} - {}".format(name, url)):
+            self.tracker.repo.push()
+        return web.json_response({"ok": True})
 
     async def update_url(self, request: web.Request) -> web.Response:
         url_id = int(request.match_info["id"])
