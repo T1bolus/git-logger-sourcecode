@@ -176,7 +176,10 @@ class SteamSession:
                 return self._force_english(url)
             steamid = match.group(1)
             new_path = re.sub(r'^/id/[^/]+', '/profiles/{}'.format(steamid), parsed.path)
-            new_url = "{}://{}{}?l=english".format(parsed.scheme or "https", parsed.hostname, new_path)
+            new_url = "{}://{}{}".format(parsed.scheme or "https", parsed.hostname, new_path)
+            if parsed.query:
+                new_url += "?" + parsed.query
+            new_url = self._force_english(new_url)
             return new_url
         except Exception:
             return self._force_english(url)

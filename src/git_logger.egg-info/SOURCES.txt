@@ -1,3 +1,4 @@
+README.md
 pyproject.toml
 src/git_logger/__init__.py
 src/git_logger/__main__.py

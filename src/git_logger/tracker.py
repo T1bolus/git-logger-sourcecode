@@ -35,6 +35,7 @@ class Tracker:
         if not site_dir.exists():
             return
         tracked_safe_names = {_safe_name(u["name"]) for u in self.state.urls}
+        removed = False
         for f in site_dir.iterdir():
             if not f.is_file():
                 continue
@@ -42,6 +43,10 @@ class Tracker:
             if stem not in tracked_safe_names:
                 LOG.info("Removing stale site file: %s", f.name)
                 f.unlink()
+                removed = True
+        if removed:
+            if self.repo.commit("Cleanup: remove stale site files"):
+                self.repo.push()
 
     async def run(self) -> None:
         LOG.info("Tracker started")
