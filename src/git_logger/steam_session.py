@@ -45,6 +45,7 @@ class SteamSession:
         self._authenticator: Optional[SteamAuthenticator] = None
         self._auth_error: str = ""
         self._authenticated: bool = False
+        self._steamid_cache: dict[str, str] = {}
 
     @property
     def is_authenticated(self) -> bool:
@@ -176,27 +177,32 @@ class SteamSession:
 
     def _resolve_steamid(self, vanity: str) -> str | None:
         """Resolve a vanity name to a 64-bit SteamID, using XML endpoint with retry."""
+        cached = self._steamid_cache.get(vanity)
+        if cached:
+            return cached
         import time
-        for attempt in range(3):
+        for attempt in range(5):
             try:
                 resp = self.session.get(
                     "https://steamcommunity.com/id/{}/?xml=1".format(vanity),
                     timeout=self.timeout,
                 )
                 if resp.status_code == 429:
-                    LOG.warning("XML endpoint rate-limited (429), retrying in %ds", (attempt + 1) * 2)
-                    time.sleep((attempt + 1) * 2)
+                    delay = (attempt + 1) * 3
+                    LOG.warning("XML endpoint rate-limited (429), retrying in %ds", delay)
+                    time.sleep(delay)
                     continue
                 if resp.status_code != 200:
                     return None
                 match = re.search(r'<steamID64>(\d+)</steamID64>', resp.text)
                 if match:
+                    self._steamid_cache[vanity] = match.group(1)
                     return match.group(1)
                 return None
             except Exception:
-                if attempt == 2:
+                if attempt == 4:
                     return None
-                time.sleep(1)
+                time.sleep(2)
         return None
 
     async def fetch_text(self, url: str) -> tuple:
