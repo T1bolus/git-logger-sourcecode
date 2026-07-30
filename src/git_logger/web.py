@@ -322,6 +322,6 @@ class WebServer:
                     snapshot = json.dumps({"snapshot": self.state.snapshot()}, ensure_ascii=False, separators=(",", ":"))
                     await response.write("data: {}\n\n".format(snapshot).encode("utf-8"))
                 await asyncio.sleep(1.0)
-        except (ConnectionResetError, asyncio.CancelledError, RuntimeError):
+        except (ConnectionError, ConnectionResetError, asyncio.CancelledError, RuntimeError):
             pass
         return response
