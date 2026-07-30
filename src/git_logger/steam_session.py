@@ -164,25 +164,40 @@ class SteamSession:
         if not re.search(r'^/id/[^/]+/games', parsed.path):
             return self._force_english(url)
         vanity = parsed.path.split('/')[2]
-        try:
-            resp = self.session.get(
-                "https://steamcommunity.com/id/{}/?xml=1".format(vanity),
-                timeout=self.timeout,
-            )
-            if resp.status_code != 200:
-                return self._force_english(url)
-            match = re.search(r'<steamID64>(\d+)</steamID64>', resp.text)
-            if not match:
-                return self._force_english(url)
-            steamid = match.group(1)
-            new_path = re.sub(r'^/id/[^/]+', '/profiles/{}'.format(steamid), parsed.path)
-            new_url = "{}://{}{}".format(parsed.scheme or "https", parsed.hostname, new_path)
-            if parsed.query:
-                new_url += "?" + parsed.query
-            new_url = self._force_english(new_url)
-            return new_url
-        except Exception:
+        steamid = self._resolve_steamid(vanity)
+        if not steamid:
             return self._force_english(url)
+        new_path = re.sub(r'^/id/[^/]+', '/profiles/{}'.format(steamid), parsed.path)
+        new_url = "{}://{}{}".format(parsed.scheme or "https", parsed.hostname, new_path)
+        if parsed.query:
+            new_url += "?" + parsed.query
+        new_url = self._force_english(new_url)
+        return new_url
+
+    def _resolve_steamid(self, vanity: str) -> str | None:
+        """Resolve a vanity name to a 64-bit SteamID, using XML endpoint with retry."""
+        import time
+        for attempt in range(3):
+            try:
+                resp = self.session.get(
+                    "https://steamcommunity.com/id/{}/?xml=1".format(vanity),
+                    timeout=self.timeout,
+                )
+                if resp.status_code == 429:
+                    LOG.warning("XML endpoint rate-limited (429), retrying in %ds", (attempt + 1) * 2)
+                    time.sleep((attempt + 1) * 2)
+                    continue
+                if resp.status_code != 200:
+                    return None
+                match = re.search(r'<steamID64>(\d+)</steamID64>', resp.text)
+                if match:
+                    return match.group(1)
+                return None
+            except Exception:
+                if attempt == 2:
+                    return None
+                time.sleep(1)
+        return None
 
     async def fetch_text(self, url: str) -> tuple:
         return await asyncio.to_thread(self.fetch_text_sync, url)
