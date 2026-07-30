@@ -40,6 +40,14 @@ class RepoManager:
         file_path.write_text(content, encoding="utf-8")
         return file_path
 
+    def delete_file(self, name: str) -> None:
+        site_dir = self.repo_path / "sites"
+        for ext in (".json", ".html"):
+            path = site_dir / "{}{}".format(_safe_name(name), ext)
+            if path.exists():
+                path.unlink()
+                LOG.info("Deleted site file: %s", path.name)
+
     def has_changes(self) -> bool:
         result = self._git("status", "--porcelain", check=False)
         return bool(result.stdout.strip())
