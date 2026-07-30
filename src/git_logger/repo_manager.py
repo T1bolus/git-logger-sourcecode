@@ -65,19 +65,19 @@ class RepoManager:
             self._git("remote", "set-url", "origin", remote_url)
         except Exception:
             pass
-        try:
-            self._git("push", "origin", "HEAD:main", check=False)
+        result = self._git("push", "origin", "HEAD:main", check=False)
+        if result.returncode == 0:
             LOG.info("Pushed to GitHub: %s", self.github_repo)
-        except subprocess.CalledProcessError as exc:
-            if "fetch first" in exc.stderr or "non-fast-forward" in exc.stderr:
-                LOG.warning("Push rejected (non-fast-forward), trying force push: %s", exc.stderr.strip())
-                try:
-                    self._git("push", "--force", "origin", "HEAD:main", check=False)
-                    LOG.info("Force pushed to GitHub: %s", self.github_repo)
-                except subprocess.CalledProcessError as exc2:
-                    LOG.warning("Force push also failed: %s", exc2.stderr.strip())
+            return
+        if "fetch first" in result.stderr or "non-fast-forward" in result.stderr:
+            LOG.warning("Push rejected (non-fast-forward), trying force push: %s", result.stderr.strip())
+            result2 = self._git("push", "--force", "origin", "HEAD:main", check=False)
+            if result2.returncode == 0:
+                LOG.info("Force pushed to GitHub: %s", self.github_repo)
             else:
-                LOG.warning("Git push failed (will retry later): %s", exc.stderr.strip())
+                LOG.warning("Force push also failed: %s", result2.stderr.strip())
+        else:
+            LOG.warning("Git push failed (will retry later): %s", result.stderr.strip())
 
     def get_log(self, max_count: int = 20) -> str:
         try:
