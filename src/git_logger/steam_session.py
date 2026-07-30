@@ -143,13 +143,26 @@ class SteamSession:
         LOG.warning("OwnedGames query not found in SSR data")
         return None
 
+    @staticmethod
+    def _force_english(url: str) -> str:
+        """Strip any `l=` parameter and append `l=english`."""
+        parsed = urlparse(url)
+        if parsed.hostname not in ("steamcommunity.com", "www.steamcommunity.com"):
+            return url
+        query_parts = [p for p in parsed.query.split("&") if p and not p.startswith("l=")]
+        new_q = "&".join(query_parts)
+        if new_q:
+            new_q += "&"
+        new_q += "l=english"
+        return "{}://{}{}?{}".format(parsed.scheme or "https", parsed.hostname, parsed.path, new_q)
+
     def _resolve_steam_url(self, url: str) -> str:
         """Resolve vanity /id/{name}/ URLs to /profiles/{steamid}/ for games pages."""
         parsed = urlparse(url)
         if parsed.hostname not in ("steamcommunity.com", "www.steamcommunity.com"):
             return url
         if not re.search(r'^/id/[^/]+/games', parsed.path):
-            return url
+            return self._force_english(url)
         vanity = parsed.path.split('/')[2]
         try:
             resp = self.session.get(
@@ -157,20 +170,16 @@ class SteamSession:
                 timeout=self.timeout,
             )
             if resp.status_code != 200:
-                return url
+                return self._force_english(url)
             match = re.search(r'<steamID64>(\d+)</steamID64>', resp.text)
             if not match:
-                return url
+                return self._force_english(url)
             steamid = match.group(1)
             new_path = re.sub(r'^/id/[^/]+', '/profiles/{}'.format(steamid), parsed.path)
-            new_url = "{}://{}{}".format(parsed.scheme or "https", parsed.hostname, new_path)
-            if parsed.query:
-                new_url += "?" + parsed.query
-            if "l=" not in new_url:
-                new_url += ("&" if parsed.query else "?") + "l=english"
+            new_url = "{}://{}{}?l=english".format(parsed.scheme or "https", parsed.hostname, new_path)
             return new_url
         except Exception:
-            return url
+            return self._force_english(url)
 
     async def fetch_text(self, url: str) -> tuple:
         return await asyncio.to_thread(self.fetch_text_sync, url)
