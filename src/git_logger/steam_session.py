@@ -176,10 +176,21 @@ class SteamSession:
         return new_url
 
     def _resolve_steamid(self, vanity: str) -> str | None:
-        """Resolve a vanity name to a 64-bit SteamID, using XML endpoint with retry."""
+        """Resolve a vanity name to a 64-bit SteamID via XML (cached) with fallback to SSR extraction."""
         cached = self._steamid_cache.get(vanity)
         if cached:
             return cached
+        steamid = self._resolve_steamid_xml(vanity)
+        if steamid:
+            self._steamid_cache[vanity] = steamid
+            return steamid
+        steamid = self._resolve_steamid_ssr(vanity)
+        if steamid:
+            self._steamid_cache[vanity] = steamid
+        return steamid
+
+    def _resolve_steamid_xml(self, vanity: str) -> str | None:
+        """Resolve vanity name via XML endpoint with retry."""
         import time
         for attempt in range(5):
             try:
@@ -196,7 +207,6 @@ class SteamSession:
                     return None
                 match = re.search(r'<steamID64>(\d+)</steamID64>', resp.text)
                 if match:
-                    self._steamid_cache[vanity] = match.group(1)
                     return match.group(1)
                 return None
             except Exception:
@@ -204,6 +214,30 @@ class SteamSession:
                     return None
                 time.sleep(2)
         return None
+
+    def _resolve_steamid_ssr(self, vanity: str) -> str | None:
+        """Fallback: extract steamid from the games page SSR renderContext."""
+        try:
+            resp = self.session.get(
+                "https://steamcommunity.com/id/{}/games/?l=english".format(vanity),
+                timeout=self.timeout,
+            )
+            if resp.status_code != 200:
+                return None
+            m = re.search(r'SSR\.renderContext\s*=\s*JSON\.parse\("([^"]+)"\)\s*;', resp.text)
+            if not m:
+                return None
+            import json as _json
+            inner = _json.loads('"' + m.group(1) + '"')
+            data = _json.loads(inner)
+            qd = _json.loads(data.get('queryData', '{}'))
+            for q in qd.get('queries', []):
+                qkey = q.get('queryKey', [])
+                if len(qkey) >= 2 and qkey[0] == 'OwnedGames' and qkey[1].isdigit():
+                    return qkey[1]
+            return None
+        except Exception:
+            return None
 
     async def fetch_text(self, url: str) -> tuple:
         return await asyncio.to_thread(self.fetch_text_sync, url)
