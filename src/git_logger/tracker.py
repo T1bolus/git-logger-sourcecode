@@ -52,8 +52,14 @@ class Tracker:
         LOG.info("Tracker started")
         await self.cleanup_stale_files()
         while not self._stop_event.is_set():
+            await self._ensure_steam_fresh()
             await self._check_due()
             await asyncio.sleep(30)
+
+    async def _ensure_steam_fresh(self) -> None:
+        if self.steam_session and not self.steam_session.session_fresh():
+            LOG.warning("Steam session cookie near expiry; refreshing")
+            await self.steam_session.refresh_async()
 
     async def stop(self) -> None:
         self._stop_event.set()
@@ -92,7 +98,7 @@ class Tracker:
             self.repo.push()
             LOG.info("Change detected and committed for %s", name)
 
-        self.state.record_check(url_id, new_hash, changed=True)
+        self.state.record_check(url_id, new_hash, changed=changed)
 
     async def _fetch(self, url: str) -> tuple:
         if self.steam_session and SteamSession.is_steam_url(url):
