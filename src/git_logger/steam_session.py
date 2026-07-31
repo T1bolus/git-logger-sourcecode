@@ -5,9 +5,10 @@ import html
 import json
 import logging
 import re
+import time
 from pathlib import Path
 from typing import Callable, Optional
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 import requests
 
@@ -91,7 +92,11 @@ class SteamSession:
                 allow_redirects=True,
                 timeout=self.timeout,
             )
-            return response.status_code == 200 and "steamLoginSecure" in str(self.session.cookies)
+            return bool(
+                response.status_code == 200
+                and "steamLoginSecure" in str(self.session.cookies)
+                and re.search(r'g_steamID\s*=\s*["\']?(\d{17})["\']?\s*;', response.text)
+            )
         except requests.RequestException as exc:
             LOG.error("Steam verify failed: %s", exc)
             return False
@@ -103,14 +108,23 @@ class SteamSession:
             resolved_url = self._resolve_steam_url(url)
             if resolved_url != url:
                 LOG.info("Resolved Steam URL: %s -> %s", url, resolved_url)
-            response = self.session.get(resolved_url, allow_redirects=True, timeout=self.timeout)
-            if response.status_code != 200:
-                return "", "HTTP {}".format(response.status_code)
-            text = response.text
-            if self._is_games_page(resolved_url):
+            text, final_url, err = self._get(resolved_url)
+            if err:
+                return "", err
+            is_games = self._is_games_page(resolved_url)
+            if is_games and "/login/" in final_url:
+                LOG.warning("Steam session expired while fetching %s; refreshing session", resolved_url)
+                if self.refresh_session():
+                    text, final_url, err = self._get(resolved_url)
+                    if err:
+                        return "", err
+            if is_games:
                 games = self._extract_game_list(text)
                 if games:
                     return json.dumps(games, indent=2, ensure_ascii=False), ""
+                if self._looks_logged_out(text):
+                    return "", "Steam session not authenticated (games page returned login page)"
+                return "", "Games page returned no SSR data for {}".format(resolved_url)
             return text, ""
         except requests.Timeout:
             return "", "Timeout"
@@ -118,6 +132,54 @@ class SteamSession:
             return "", str(exc)
         except Exception as exc:
             return "", str(exc)
+
+    def _get(self, url: str) -> tuple:
+        """GET a page, returning (text, final_url, error)."""
+        response = self.session.get(url, allow_redirects=True, timeout=self.timeout)
+        if response.status_code != 200:
+            return "", response.url, "HTTP {}".format(response.status_code)
+        return response.text, response.url, ""
+
+    @staticmethod
+    def _looks_logged_out(text: str) -> bool:
+        return 'logged_in&quot;:false' in text
+
+    def refresh_session(self) -> bool:
+        """Force fresh web cookies from the saved refresh token."""
+        if not self._authenticator:
+            return False
+        result = self._authenticator.refresh_authenticated_session()
+        self._authenticated = result
+        return result
+
+    async def refresh_async(self) -> bool:
+        return await asyncio.to_thread(self.refresh_session)
+
+    def _steam_login_cookie_value(self) -> str:
+        for cookie in self.session.cookies:
+            if cookie.name == "steamLoginSecure" and "steamcommunity.com" in (cookie.domain or ""):
+                return str(cookie.value)
+        return ""
+
+    def _cookie_expiry(self) -> Optional[float]:
+        """Unix timestamp when the embedded JWT in the login cookie expires."""
+        value = self._steam_login_cookie_value()
+        if not value or "||" not in unquote(value):
+            return None
+        jwt = unquote(value).split("||", 1)[1]
+        exp = SteamAuthenticator._decode_jwt(jwt).get("exp")
+        if isinstance(exp, (int, float)):
+            return float(exp)
+        return None
+
+    def session_fresh(self, margin: float = 3600.0) -> bool:
+        """True if authenticated and the cookie JWT is not near expiry."""
+        if not self._authenticated:
+            return False
+        exp = self._cookie_expiry()
+        if exp is None:
+            return False
+        return exp > time.time() + margin
 
     def _is_games_page(self, url: str) -> bool:
         parsed = urlparse(url)
