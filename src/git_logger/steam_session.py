@@ -142,7 +142,12 @@ class SteamSession:
 
     @staticmethod
     def _looks_logged_out(text: str) -> bool:
-        return 'logged_in&quot;:false' in text
+        # Old pages embedded HTML-encoded login state; the rebuilt pages
+        # (valve-ssr-data era) answer logged-out fetches with a login wall
+        # carrying g_steamID = false.
+        return 'logged_in&quot;:false' in text or bool(
+            re.search(r'g_steamID\s*=\s*false', text)
+        )
 
     def refresh_session(self) -> bool:
         """Force fresh web cookies from the saved refresh token."""
@@ -187,24 +192,48 @@ class SteamSession:
             return False
         return bool(re.search(r'/games', parsed.path))
 
-    @staticmethod
-    def _extract_game_list(page_html: str) -> list | None:
-        m = re.search(r'SSR\.renderContext\s*=\s*JSON\.parse\("(.+)"\)\s*;', page_html)
+    _SSR_DATA_RE = re.compile(
+        r'<script[^>]*id="valve-ssr-data"[^>]*>(.*?)</script>', re.DOTALL
+    )
+
+    @classmethod
+    def _parse_ssr_queries(cls, page_html: str) -> list | None:
+        """React-query cache from the games page SSR data.
+
+        Steam originally shipped the cache as SSR.renderContext = JSON.parse("…")
+        and rebuilt the page (11.10.2026) into a plain
+        <script type="application/json" id="valve-ssr-data"> element whose
+        renderContext.queryData is the same doubly-encoded JSON string as
+        before. Returns the queries list, or None when the page carries no
+        SSR data at all.
+        """
+        m = cls._SSR_DATA_RE.search(page_html)
         if not m:
-            LOG.warning("SSR.renderContext not found in page")
+            LOG.warning("valve-ssr-data element not found in page")
             return None
         try:
-            inner = json.loads('"' + m.group(1) + '"')
-            data = json.loads(inner)
-            qd = json.loads(data.get('queryData', '{}'))
-        except (json.JSONDecodeError, KeyError, TypeError) as exc:
-            LOG.warning("Failed to parse SSR renderContext: %s", exc)
+            data = json.loads(m.group(1))
+            render_context = data.get("renderContext") or {}
+            query_data = render_context.get("queryData", "{}")
+            if isinstance(query_data, str):
+                query_data = json.loads(query_data)
+            queries = query_data.get("queries")
+        except (json.JSONDecodeError, AttributeError, TypeError) as exc:
+            LOG.warning("Failed to parse valve-ssr-data: %s", exc)
             return None
-        for q in qd.get('queries', []):
+        return queries if isinstance(queries, list) else None
+
+    @classmethod
+    def _extract_game_list(cls, page_html: str) -> list | None:
+        queries = cls._parse_ssr_queries(page_html)
+        if queries is None:
+            return None
+        for q in queries:
             qkey = q.get('queryKey', [])
             if len(qkey) >= 1 and qkey[0] == 'OwnedGames':
                 raw_games = q.get('state', {}).get('data')
                 if not isinstance(raw_games, list):
+                    LOG.warning("OwnedGames query carries no game list")
                     return None
                 games = [{"appid": g["appid"], "name": g["name"]} for g in raw_games if "appid" in g and "name" in g]
                 games.sort(key=lambda x: x["appid"])
@@ -296,14 +325,10 @@ class SteamSession:
             )
             if resp.status_code != 200:
                 return None
-            m = re.search(r'SSR\.renderContext\s*=\s*JSON\.parse\("([^"]+)"\)\s*;', resp.text)
-            if not m:
+            queries = self._parse_ssr_queries(resp.text)
+            if queries is None:
                 return None
-            import json as _json
-            inner = _json.loads('"' + m.group(1) + '"')
-            data = _json.loads(inner)
-            qd = _json.loads(data.get('queryData', '{}'))
-            for q in qd.get('queries', []):
+            for q in queries:
                 qkey = q.get('queryKey', [])
                 if len(qkey) >= 2 and qkey[0] == 'OwnedGames' and qkey[1].isdigit():
                     return qkey[1]
