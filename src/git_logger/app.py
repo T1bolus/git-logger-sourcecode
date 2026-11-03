@@ -88,6 +88,7 @@ class Application:
             self.session,
             self.settings.default_interval,
             steam_session=self.steam_session,
+            alt_sessions=self.alt_steam_sessions,
         )
         self.web = WebServer(self.state, self.tracker, self.settings.host, self.settings.port)
 
