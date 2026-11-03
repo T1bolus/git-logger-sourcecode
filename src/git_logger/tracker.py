@@ -6,7 +6,7 @@ from typing import Optional
 
 import aiohttp
 
-from .repo_manager import RepoManager, _safe_name
+from .repo_manager import RepoManager, _safe_name, build_commit_message
 from .state import StateStore
 from .steam_session import SteamSession
 
@@ -92,8 +92,10 @@ class Tracker:
             self.state.record_check(url_id, new_hash, changed=False)
             return
 
+        old_content = self.repo.read_current_content(name)
         self.repo.write_content(name, content)
-        changed = self.repo.commit("Update: {} - {}".format(name, url))
+        message = build_commit_message(name, url, old_content, content)
+        changed = self.repo.commit(message)
         if changed:
             self.repo.push()
             LOG.info("Change detected and committed for %s", name)

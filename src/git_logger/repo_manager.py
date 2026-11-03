@@ -1,7 +1,8 @@
+import json
 import logging
 import subprocess
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 LOG = logging.getLogger(__name__)
 
@@ -47,6 +48,18 @@ class RepoManager:
             if path.exists():
                 path.unlink()
                 LOG.info("Deleted site file: %s", path.name)
+
+    def read_current_content(self, name: str) -> str:
+        """Return the currently committed site content, or '' when absent."""
+        safe = _safe_name(name)
+        for ext in (".json", ".html"):
+            path = self.repo_path / "sites" / "{}{}".format(safe, ext)
+            if path.exists():
+                try:
+                    return path.read_text(encoding="utf-8")
+                except OSError:
+                    return ""
+        return ""
 
     def has_changes(self) -> bool:
         result = self._git("status", "--porcelain", check=False)
@@ -114,3 +127,37 @@ class RepoManager:
 def _safe_name(name: str) -> str:
     safe = "".join(c if c.isalnum() or c in "._- " else "_" for c in name)
     return safe.strip().replace(" ", "_") or "untitled"
+
+
+def _game_names(content: str) -> Optional[List[str]]:
+    """Extract game names from a tracked JSON game list, or None when the
+    content is not a list of games (HTML pages, first commit, broken JSON)."""
+    try:
+        data = json.loads(content)
+    except ValueError:
+        return None
+    if not isinstance(data, list) or not all(isinstance(g, dict) and g.get("name") for g in data):
+        return None
+    return [str(g["name"]) for g in data]
+
+
+def build_commit_message(name: str, url: str, old_content: str, new_content: str) -> str:
+    """Build the commit message for a site update.
+
+    Steam game lists are tracked as JSON; the message names the games that
+    were added (or, when nothing was added, removed). Everything else keeps
+    the generic Update message.
+    """
+    old_names = _game_names(old_content)
+    new_names = _game_names(new_content)
+    if old_names is None or new_names is None:
+        return "Update: {} - {}".format(name, url)
+    old_set = set(old_names)
+    new_set = set(new_names)
+    added = [g for g in new_names if g not in old_set]
+    removed = [g for g in old_names if g not in new_set]
+    if added:
+        return "{} added {}".format(name, ",".join(added))
+    if removed:
+        return "{} removed {}".format(name, ",".join(removed))
+    return "Update: {} - {}".format(name, url)
