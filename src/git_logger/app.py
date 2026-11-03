@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import signal
-from typing import Optional
+from typing import Dict, Optional
 
 import aiohttp
 
@@ -34,6 +34,7 @@ class Application:
 
         self.session: Optional[aiohttp.ClientSession] = None
         self.steam_session: Optional[SteamSession] = None
+        self.alt_steam_sessions: Dict[str, SteamSession] = {}
         self.tracker: Optional[Tracker] = None
         self.web: Optional[WebServer] = None
 
@@ -60,6 +61,22 @@ class Application:
                     "Run 'python -m git_logger --setup-steam' for interactive login, "
                     "or use POST /api/steam/auth to authenticate via the API."
                 )
+
+        for spec in self.settings.alt_steam_sessions:
+            session = SteamSession(
+                spec.username,
+                spec.password,
+                spec.cookie_file,
+                spec.token_file,
+            )
+            LOG.info("Authenticating alt Steam session %r as %s", spec.name, spec.username)
+            if not session.ensure_authenticated(interactive=False):
+                LOG.warning(
+                    "Alt Steam session %r could not be authenticated (no usable saved session); "
+                    "URLs assigned to it will fail until the token files are provisioned",
+                    spec.name,
+                )
+            self.alt_steam_sessions[spec.name] = session
 
         timeout = aiohttp.ClientTimeout(total=30, connect=10, sock_read=20)
         connector = aiohttp.TCPConnector(limit=50, ttl_dns_cache=300)

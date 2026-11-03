@@ -2,7 +2,7 @@ import asyncio
 import hashlib
 import logging
 import time
-from typing import Optional
+from typing import Dict, List, Optional
 
 import aiohttp
 
@@ -21,12 +21,14 @@ class Tracker:
         session: aiohttp.ClientSession,
         default_interval: int,
         steam_session: SteamSession | None = None,
+        alt_sessions: Optional[Dict[str, SteamSession]] = None,
     ) -> None:
         self.state = state
         self.repo = repo
         self.session = session
         self.default_interval = default_interval
         self.steam_session = steam_session
+        self.alt_sessions = dict(alt_sessions or {})
         self._stop_event = asyncio.Event()
 
     async def cleanup_stale_files(self) -> None:
@@ -56,10 +58,17 @@ class Tracker:
             await self._check_due()
             await asyncio.sleep(30)
 
+    def _all_steam_sessions(self) -> List[SteamSession]:
+        sessions = list(self.alt_sessions.values())
+        if self.steam_session is not None:
+            sessions.append(self.steam_session)
+        return sessions
+
     async def _ensure_steam_fresh(self) -> None:
-        if self.steam_session and not self.steam_session.session_fresh():
-            LOG.warning("Steam session cookie near expiry; refreshing")
-            await self.steam_session.refresh_async()
+        for session in self._all_steam_sessions():
+            if session.is_authenticated and not session.session_fresh():
+                LOG.warning("Steam session for %s near expiry; refreshing", session.username)
+                await session.refresh_async()
 
     async def stop(self) -> None:
         self._stop_event.set()
@@ -81,7 +90,7 @@ class Tracker:
         url = url_entry["url"]
         old_hash = url_entry.get("last_hash", "")
 
-        content, error = await self._fetch(url)
+        content, error = await self._fetch(url, self._steam_session_for(url_entry))
         if error:
             LOG.warning("Fetch error for %s (%s): %s", name, url, error)
             self.state.record_check(url_id, old_hash, changed=False, error=error)
@@ -102,9 +111,18 @@ class Tracker:
 
         self.state.record_check(url_id, new_hash, changed=changed)
 
-    async def _fetch(self, url: str) -> tuple:
-        if self.steam_session and SteamSession.is_steam_url(url):
-            return await self.steam_session.fetch_text(url)
+    def _steam_session_for(self, url_entry: dict) -> Optional[SteamSession]:
+        session_name = str(url_entry.get("session", "")).strip()
+        if session_name:
+            session = self.alt_sessions.get(session_name)
+            if session is not None:
+                return session
+            LOG.warning("Unknown Steam session %r for %s; using default", session_name, url_entry.get("name"))
+        return self.steam_session
+
+    async def _fetch(self, url: str, steam_session: Optional[SteamSession] = None) -> tuple:
+        if steam_session and SteamSession.is_steam_url(url):
+            return await steam_session.fetch_text(url)
         try:
             async with self.session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
                 if resp.status != 200:

@@ -277,6 +277,8 @@ class WebServer:
             updates["enabled"] = bool(body["enabled"])
         else:
             updates["enabled"] = not entry["enabled"]
+        if "session" in body:
+            updates["session"] = str(body.get("session") or "").strip()
         self.state.update_url(url_id, **updates)
         return web.json_response({"ok": True, "enabled": updates.get("enabled", entry["enabled"])})
 

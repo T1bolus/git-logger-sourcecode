@@ -82,6 +82,7 @@ class StateStore:
             "last_checked": 0.0,
             "last_changed": 0.0,
             "error": "",
+            "session": "",
         }
         self._state["urls"].append(entry)
         self._persist()
@@ -100,7 +101,7 @@ class StateStore:
     def update_url(self, url_id: int, **updates: Any) -> bool:
         for u in self._state["urls"]:
             if u["id"] == url_id:
-                allowed = {"url", "name", "interval", "enabled"}
+                allowed = {"url", "name", "interval", "enabled", "session"}
                 for key, value in updates.items():
                     if key in allowed:
                         u[key] = value
