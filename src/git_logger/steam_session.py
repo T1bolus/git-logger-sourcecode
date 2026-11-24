@@ -53,6 +53,7 @@ class SteamSession:
         self._auth_error: str = ""
         self._authenticated: bool = False
         self._steamid_cache: dict[str, str] = {}
+        self._last_recovery_attempt: float = 0.0
 
     @property
     def is_authenticated(self) -> bool:
@@ -103,7 +104,8 @@ class SteamSession:
 
     def fetch_text_sync(self, url: str) -> tuple:
         if not self._authenticated:
-            return "", "Steam not authenticated"
+            if not self._try_refresh():
+                return "", "Steam not authenticated"
         try:
             resolved_url = self._resolve_steam_url(url)
             if resolved_url != url:
@@ -113,8 +115,8 @@ class SteamSession:
                 return "", err
             is_games = self._is_games_page(resolved_url)
             if is_games and "/login/" in final_url:
-                LOG.warning("Steam session expired while fetching %s; refreshing session", resolved_url)
-                if self.refresh_session():
+                LOG.warning("Steam session rejected %s; refreshing session", resolved_url)
+                if self._try_refresh(cooldown=30.0):
                     text, final_url, err = self._get(resolved_url)
                     if err:
                         return "", err
@@ -159,6 +161,26 @@ class SteamSession:
 
     async def refresh_async(self) -> bool:
         return await asyncio.to_thread(self.refresh_session)
+
+    def _try_refresh(self, cooldown: float = 120.0) -> bool:
+        """Re-establish the web session from the saved refresh token.
+
+        Rate-limited so a dead network (e.g. a container that started before
+        the host's networking was up) or a revoked token cannot turn every
+        fetch into a fresh auth round-trip. Returns the authenticated state.
+        """
+        now = time.time()
+        if now - self._last_recovery_attempt < cooldown:
+            return self._authenticated
+        self._last_recovery_attempt = now
+        if self._authenticator is None:
+            LOG.warning("Steam session for %s is not authenticated; attempting re-authentication", self.username)
+            return self.ensure_authenticated(interactive=False)
+        LOG.warning("Steam session for %s is not valid; attempting automatic recovery from saved refresh token", self.username)
+        return self.refresh_session()
+
+    async def recover_async(self) -> bool:
+        return await asyncio.to_thread(self._try_refresh)
 
     def _steam_login_cookie_value(self) -> str:
         for cookie in self.session.cookies:

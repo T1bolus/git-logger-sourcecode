@@ -78,6 +78,7 @@ class _FakeSession:
         self._authed = authed
         self._fresh = fresh
         self.refreshes = 0
+        self.recoveries = 0
 
     @property
     def is_authenticated(self):
@@ -88,6 +89,10 @@ class _FakeSession:
 
     async def refresh_async(self):
         self.refreshes += 1
+        return True
+
+    async def recover_async(self):
+        self.recoveries += 1
         return True
 
     async def fetch_text(self, url):
@@ -141,6 +146,9 @@ class KeepAliveTests(unittest.TestCase):
         self.assertEqual(main.refreshes, 1)
         self.assertEqual(alt_ok.refreshes, 1)
         self.assertEqual(alt_dead.refreshes, 0)
+        # An unauthenticated session must not be blindly refreshed; it is
+        # handed to the rate-limited recovery path instead.
+        self.assertEqual(alt_dead.recoveries, 1)
 
     def test_fresh_sessions_are_left_alone(self):
         main = _FakeSession("main", authed=True, fresh=True)

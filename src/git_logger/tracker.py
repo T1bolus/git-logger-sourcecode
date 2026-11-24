@@ -66,7 +66,13 @@ class Tracker:
 
     async def _ensure_steam_fresh(self) -> None:
         for session in self._all_steam_sessions():
-            if session.is_authenticated and not session.session_fresh():
+            if not session.is_authenticated:
+                # Covers the reboot race: the container can start before the
+                # host network is up, so startup auth fails with a DNS error
+                # and must heal itself once connectivity is back. The attempt
+                # is rate-limited inside _try_refresh.
+                await session.recover_async()
+            elif not session.session_fresh():
                 LOG.warning("Steam session for %s near expiry; refreshing", session.username)
                 await session.refresh_async()
 
